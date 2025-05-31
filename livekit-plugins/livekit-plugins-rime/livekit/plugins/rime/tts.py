@@ -222,7 +222,7 @@ class ChunkedStream(tts.ChunkedStream):
                 payload["phonemizeBetweenBrackets"] = mistv2_opts.phonemize_between_brackets
 
         headers = {
-            "accept": f"audio/{format}",
+            "accept": "audio/pcm",
             "Authorization": f"Bearer {self._api_key}",
             "content-type": "application/json",
         }
