@@ -34,6 +34,7 @@ from livekit.agents.types import (
     NotGivenOr,
 )
 from livekit.agents.utils import is_given
+from livekit import rtc
 
 from .langs import TTSLangs
 from .log import logger
@@ -232,15 +233,20 @@ class ChunkedStream(tts.ChunkedStream):
                 payload["phonemizeBetweenBrackets"] = mistv2_opts.phonemize_between_brackets
 
         headers = {
-            "accept": f"audio/{format}",
+            "accept": "audio/pcm",
             "Authorization": f"Bearer {self._api_key}",
             "content-type": "application/json",
         }
-        decoder = utils.codecs.AudioStreamDecoder(
-            sample_rate=self._tts.sample_rate,
-            num_channels=NUM_CHANNELS,
-            format=format,
-        )
+
+        use_pcm = True
+        decoder = None
+
+        if not use_pcm:
+            decoder = utils.codecs.AudioStreamDecoder(
+                sample_rate=self._tts.sample_rate,
+                num_channels=NUM_CHANNELS,
+                format=format,
+            )
 
         decode_task: asyncio.Task | None = None
         try:
@@ -257,24 +263,46 @@ class ChunkedStream(tts.ChunkedStream):
                     content = await response.text()
                     logger.error("Rime returned non-audio data: %s", content)
                     return
-
-                async def _decode_loop():
-                    try:
-                        async for bytes_data, _ in response.content.iter_chunks():
-                            decoder.push(bytes_data)
-                    finally:
-                        decoder.end_input()
-
-                decode_task = asyncio.create_task(_decode_loop())
+                
                 emitter = tts.SynthesizedAudioEmitter(
                     event_ch=self._event_ch,
                     request_id=request_id,
                     segment_id=self._segment_id,
                 )
+                
+                if use_pcm:
+                # Handle PCM directly without decoder
+                    bytes_per_sample = 2  # 16-bit PCM
+                    async for chunk, _ in response.content.iter_chunks():
+                        if len(chunk) == 0:
+                            continue
+                    
+                        samples_per_channel = len(chunk) // (NUM_CHANNELS * bytes_per_sample)
+                        if samples_per_channel > 0:
+                            frame = rtc.AudioFrame.create(
+                                sample_rate=self._tts.sample_rate,
+                                num_channels=NUM_CHANNELS,
+                                samples_per_channel=samples_per_channel,
+                            )
+                            frame.data = chunk
+                            emitter.push(frame)
+                else:
+                # Original decoder path
+                    async def _decode_loop():
+                        try:
+                            async for bytes_data, _ in response.content.iter_chunks():
+                                decoder.push(bytes_data)
+                        finally:
+                            decoder.end_input()
 
-                async for frame in decoder:
-                    emitter.push(frame)
+                    decode_task = asyncio.create_task(_decode_loop())
+                    async for frame in decoder:
+                        emitter.push(frame)
+            
                 emitter.flush()
+
+
+    
 
         except asyncio.TimeoutError as e:
             raise APITimeoutError() from e
