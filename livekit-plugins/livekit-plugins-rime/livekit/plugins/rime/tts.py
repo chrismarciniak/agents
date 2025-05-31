@@ -210,7 +210,7 @@ class ChunkedStream(tts.ChunkedStream):
             async with self._tts._ensure_session().post(
                 self._tts._base_url,
                 headers={
-                    "accept": format,
+                    "accept": "audio/pcm",
                     "Authorization": f"Bearer {self._tts._api_key}",
                     "content-type": "application/json",
                 },
