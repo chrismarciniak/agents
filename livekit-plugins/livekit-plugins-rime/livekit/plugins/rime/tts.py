@@ -229,7 +229,7 @@ class ChunkedStream(tts.ChunkedStream):
         decoder = utils.codecs.AudioStreamDecoder(
             sample_rate=self._tts.sample_rate,
             num_channels=NUM_CHANNELS,
-            format=format,
+            format="audio/pcm",
         )
 
         decode_task: asyncio.Task | None = None
